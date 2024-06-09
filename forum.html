@@ -1,0 +1,90 @@
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const bodyParser = require('body-parser');
+const crypto = require('crypto');
+const app = express();
+const PORT = 3000;
+
+app.use(bodyParser.json());
+app.use(express.static('public'));
+
+const commentsFile = path.join(__dirname, 'data/comments.json');
+const usersFile = path.join(__dirname, 'data/users.json');
+
+// Middleware to get encrypted user IP address
+app.use((req, res, next) => {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    req.userIP = crypto.createHash('sha256').update(ip).digest('hex');
+    next();
+});
+
+// Get comments
+app.get('/api/comments', (req, res) => {
+    fs.readFile(commentsFile, (err, data) => {
+        if (err) return res.status(500).json({ error: 'Could not read comments file' });
+        res.json(JSON.parse(data));
+    });
+});
+
+// Add comment
+app.post('/api/comments', (req, res) => {
+    const newComment = {
+        username: req.body.username,
+        comment: req.body.comment,
+        ip: req.userIP
+    };
+
+    fs.readFile(commentsFile, (err, data) => {
+        if (err) return res.status(500).json({ error: 'Could not read comments file' });
+
+        const comments = JSON.parse(data);
+        comments.push(newComment);
+
+        fs.writeFile(commentsFile, JSON.stringify(comments, null, 2), (err) => {
+            if (err) return res.status(500).json({ error: 'Could not write comments file' });
+            res.status(201).json(newComment);
+        });
+    });
+});
+
+// Check if user exists
+app.get('/api/users', (req, res) => {
+    fs.readFile(usersFile, (err, data) => {
+        if (err) return res.status(500).json({ error: 'Could not read users file' });
+
+        const users = JSON.parse(data);
+        const user = users.find(u => u.ip === req.userIP);
+        res.json(user);
+    });
+});
+
+// Add or update user
+app.post('/api/users', (req, res) => {
+    const newUser = {
+        username: req.body.username,
+        ip: req.userIP
+    };
+
+    fs.readFile(usersFile, (err, data) => {
+        if (err) return res.status(500).json({ error: 'Could not read users file' });
+
+        let users = JSON.parse(data);
+        const userIndex = users.findIndex(u => u.ip === req.userIP);
+
+        if (userIndex > -1) {
+            users[userIndex] = newUser;  // Update existing user
+        } else {
+            users.push(newUser);  // Add new user
+        }
+
+        fs.writeFile(usersFile, JSON.stringify(users, null, 2), (err) => {
+            if (err) return res.status(500).json({ error: 'Could not write users file' });
+            res.status(201).json(newUser);
+        });
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+});
